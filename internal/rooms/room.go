@@ -69,7 +69,7 @@ type UpdateAvailabilityRequest struct {
 // ListFilter — фильтры для GET /api/v1/rooms.
 type ListFilter struct {
 	Building string
-	Floor    int
+	Floor    *int
 	Limit    int
 	Offset   int
 }

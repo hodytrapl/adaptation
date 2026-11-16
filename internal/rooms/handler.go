@@ -78,7 +78,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	if v := q.Get("floor"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
-			filter.Floor = n
+			filter.Floor = &n
 		}
 	}
 	if v := q.Get("limit"); v != "" {

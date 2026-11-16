@@ -27,8 +27,8 @@ func NewStore(db *sql.DB) Store { return &pgStore{db: db} }
 // teacherSelect: LEFT JOIN на map_build, чтобы отдать room одним запросом.
 const teacherSelect = `
 	SELECT
-		t.id, t.full_name, t.department, t.position, t.contacts, t.photo_url,
-		t.created_at,
+		t.id, t.user_id, t.full_name, t.department, t.position,
+		t.contacts, COALESCE(t.photo_url, ''), t.created_at,
 		m.id, m.number, m.building
 	FROM teachers t
 	LEFT JOIN map_build m ON m.id = t.room_id
@@ -36,17 +36,24 @@ const teacherSelect = `
 
 func scanTeacher(row interface{ Scan(dest ...any) error }, tch *Teacher) error {
 	var (
+		userID      sql.NullInt64
 		contactsRaw []byte
 		roomID      sql.NullInt64
 		roomNumber  sql.NullString
 		roomBuild   sql.NullString
 	)
 	if err := row.Scan(
-		&tch.ID, &tch.FullName, &tch.Department, &tch.Position,
+		&tch.ID, &userID, &tch.FullName, &tch.Department, &tch.Position,
 		&contactsRaw, &tch.PhotoURL, &tch.CreatedAt,
 		&roomID, &roomNumber, &roomBuild,
 	); err != nil {
 		return err
+	}
+	if userID.Valid {
+		v := userID.Int64
+		tch.UserID = &v
+	} else {
+		tch.UserID = nil
 	}
 	if len(contactsRaw) > 0 {
 		if err := json.Unmarshal(contactsRaw, &tch.Contacts); err != nil {

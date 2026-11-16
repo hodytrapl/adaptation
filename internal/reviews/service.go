@@ -41,21 +41,24 @@ func NewService(store Store, notifier Notifier) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, req CreateReviewRequest) (*Review, error) {
+	tags := req.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+
 	r := &Review{
 		KeyID:       req.KeyID,
 		SenderID:    req.SenderID,
 		TypeForumID: req.TypeForumID,
 		Title:       req.Title,
 		Description: req.Description,
-		Tags:        req.Tags,
+		Tags:        tags,
 		StatusID:    StatusNew,
 	}
 	created, err := s.store.Create(ctx, r)
 	if err != nil {
 		return nil, err
 	}
-	// Уведомление — best effort: не валим создание из-за недоступного
-	// email/telegram. Ошибку логируем.
 	if s.notifier != nil {
 		if err := s.notifier.ReviewCreated(ctx, created); err != nil {
 			log.Printf("notify review_created id=%d: %v", created.ID, err)

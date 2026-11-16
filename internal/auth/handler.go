@@ -28,10 +28,11 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // Router возвращает chi-роутер для /auth.
-//   POST /auth/login
-//   POST /auth/refresh
-//   POST /auth/logout
-//   GET  /auth/me      (требует AuthMiddleware — навешивается в main)
+//
+//	POST /auth/login
+//	POST /auth/refresh
+//	POST /auth/logout
+//	GET  /auth/me      (требует AuthMiddleware — навешивается в main)
 func (h *Handler) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(appMiddleware.JSONHeaderMiddleware)
@@ -49,6 +50,9 @@ func (h *Handler) Router() http.Handler {
 	r.Post("/login", h.login)
 	r.Post("/refresh", h.refresh)
 	r.Post("/logout", h.logout)
+
+	// Используем h.svc напрямую, так как он уже есть в структуре Handler
+	r.With(appMiddleware.AuthMiddleware(h.svc)).Get("/me", h.me)
 
 	return r
 }
@@ -163,18 +167,27 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 // ---- helpers (те же, что в reviews) ----
 
 func clientIP(r *http.Request) string {
-	// Простая версия. В проде — доверяйте X-Forwarded-For только от известного прокси.
+	var rawIP string
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.Index(xff, ","); i >= 0 {
-			return strings.TrimSpace(xff[:i])
+			rawIP = strings.TrimSpace(xff[:i])
+		} else {
+			rawIP = strings.TrimSpace(xff)
 		}
-		return strings.TrimSpace(xff)
+	} else {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			rawIP = r.RemoteAddr
+		} else {
+			rawIP = host
+		}
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+
+	// Проверяем, что это валидный IPv4/IPv6 для типа ::inet в PostgreSQL
+	if net.ParseIP(rawIP) == nil {
+		return ""
 	}
-	return host
+	return rawIP
 }
 
 func decodeJSONStrict(r *http.Request, dst any) error {

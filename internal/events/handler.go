@@ -92,6 +92,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 				"Invalid 'to' (use RFC3339 or YYYY-MM-DD)", map[string]any{"to": v})
 			return
 		}
+		// Если передана дата без времени (YYYY-MM-DD), включаем весь этот день до 23:59:59
+		if len(v) == 10 {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+		}
 		filter.To = t
 	}
 	// ?upcoming=true — shorthand для from=now (если from явно не задан).

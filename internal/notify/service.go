@@ -23,22 +23,26 @@ func (s *Service) Notify(ctx context.Context, userID int64, kind string, payload
 }
 
 func (s *Service) List(ctx context.Context, f ListFilter) (*ListResponse, error) {
+	if f.Limit <= 0 || f.Limit > 200 {
+		f.Limit = 50
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+
 	items, total, err := s.store.List(ctx, f)
 	if err != nil {
 		return nil, err
 	}
-	limit := f.Limit
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	offset := f.Offset
-	if offset < 0 {
-		offset = 0
-	}
 	if items == nil {
 		items = []Notification{}
 	}
-	return &ListResponse{Items: items, Total: total, Limit: limit, Offset: offset}, nil
+	return &ListResponse{
+		Items:  items,
+		Total:  total,
+		Limit:  f.Limit,
+		Offset: f.Offset,
+	}, nil
 }
 
 func (s *Service) MarkRead(ctx context.Context, id, userID int64) (*Notification, error) {

@@ -33,8 +33,9 @@ type pgStore struct{ db *sql.DB }
 func NewStore(db *sql.DB) Store { return &pgStore{db: db} }
 
 const userSelect = `
-	SELECT u.id, u.login, u.name, u.role_id, r.name, COALESCE(u.scopes,'{}'), u.created_at
-	FROM users u JOIN roles r ON r.id = u.role_id
+	SELECT u.id, u.login, u.name, COALESCE(u.role_id, 0), COALESCE(r.name, ''), COALESCE(u.scopes,'{}'), u.created_at
+	FROM users u
+	LEFT JOIN roles r ON r.id = u.role_id
 `
 
 func scanUser(row interface{ Scan(...any) error }, u *User) error {

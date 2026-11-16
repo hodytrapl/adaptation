@@ -2,8 +2,8 @@
 package auth
 
 import (
-	"time"
 	"task-manager/internal/authz"
+	"time"
 )
 
 // TokenType* — значения claim "typ".
@@ -79,11 +79,11 @@ type TokenPair struct {
 
 // MeResponse — GET /auth/me. Скоупы — эффективные (роль ∪ user).
 type MeResponse struct {
-	ID     int64    `json:"id"`
-	Login  string   `json:"login"`
-	Name   string   `json:"name"`
-	Role   string   `json:"role"`
-	Scopes []string `json:"scopes"`
+	ID        int64    `json:"id"`
+	Login     string   `json:"login"`
+	Name      string   `json:"name"`
+	Role      string   `json:"role"`
+	Scopes    []string `json:"scopes"`
 	TeacherID *int64   `json:"teacher_id,omitempty"`
 }
 

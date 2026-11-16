@@ -85,9 +85,9 @@ func (s *pgStore) List(ctx context.Context, f ListFilter) ([]Room, int, error) {
 		args = append(args, f.Building)
 		argIdx++
 	}
-	if f.Floor != 0 {
+	if f.Floor != nil {
 		conds = append(conds, fmt.Sprintf("floor = $%d", argIdx))
-		args = append(args, f.Floor)
+		args = append(args, *f.Floor)
 		argIdx++
 	}
 

@@ -10,17 +10,17 @@ import (
 	"testing"
 	"time"
 
-	"task-manager/internal/authz"
 	"task-manager/internal/auth"
+	"task-manager/internal/authz"
 )
 
 // ---- fake store ----
 
 type fakeStore struct {
-	mu      sync.Mutex
-	nextID  int64
-	rooms   map[int64]*Room
-	avail   map[string]*Availability // key: "roomID|YYYY-MM-DD"
+	mu     sync.Mutex
+	nextID int64
+	rooms  map[int64]*Room
+	avail  map[string]*Availability // key: "roomID|YYYY-MM-DD"
 }
 
 func newFakeStore() *fakeStore {
@@ -61,7 +61,7 @@ func (f *fakeStore) List(_ context.Context, flt ListFilter) ([]Room, int, error)
 		if flt.Building != "" && r.Building != flt.Building {
 			continue
 		}
-		if flt.Floor != 0 && r.Floor != flt.Floor {
+		if flt.Floor != nil && r.Floor != *flt.Floor {
 			continue
 		}
 		cp := *r

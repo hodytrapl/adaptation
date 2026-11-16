@@ -13,15 +13,15 @@ import (
 	"syscall"
 	"time"
 
-	"task-manager/internal/config"
-	"task-manager/internal/middleware"
 	"task-manager/internal/auth"
-	"task-manager/internal/reviews"
+	"task-manager/internal/config"
 	"task-manager/internal/events"
+	"task-manager/internal/middleware"
+	"task-manager/internal/notify"
+	"task-manager/internal/qa"
+	"task-manager/internal/reviews"
 	"task-manager/internal/rooms"
 	"task-manager/internal/teachers"
-	"task-manager/internal/qa"
-	"task-manager/internal/notify"
 	"task-manager/internal/users"
 
 	sqlstore "task-manager/internal/sql"
@@ -39,7 +39,7 @@ func main() {
 		log.Fatalf("DATABASE_URL is required")
 	}
 
-	// 1) Миграции — до всего остального.
+	// 1) Миграции — до всей инициализации
 	if err := sqlstore.RunUp(sqlstore.Config{
 		DSN:             cfg.DatabaseURL,
 		Timeout:         cfg.MigrateTimeout,
@@ -48,7 +48,7 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	// 2) Пул соединений. Один на приложение.
+	// 2) Пул соединений к базе данных. Один на приложение.
 	db, err := sql.Open("pgx", cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("db open: %v", err)
@@ -71,7 +71,7 @@ func main() {
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 5) Слои.
+	// 5) инициализации бизнес логики
 
 	//auth
 	authStore := auth.NewStore(db)
@@ -87,10 +87,10 @@ func main() {
 	notifyStore := notify.NewStore(db)
 	notifySvc := notify.NewService(notifyStore)
 	notifyHandler := notify.NewHandler(notifySvc, authSvc)
-	
+
 	//reviews
 	reviewsStore := reviews.NewStore(db)
-	reviewsSvc := reviews.NewService(reviewsStore, notify.NewReviewsAdapter(notifySvc)) 
+	reviewsSvc := reviews.NewService(reviewsStore, notify.NewReviewsAdapter(notifySvc))
 	reviewsHandler := reviews.NewHandler(reviewsSvc, authSvc)
 	// фоновый воркер: раз в час переводит "new" старше 5 дней в "in_progress"
 	go reviewsSvc.RunStaleWatcher(appCtx, time.Hour, 5*24*time.Hour)
@@ -111,7 +111,7 @@ func main() {
 	teachersHandler := teachers.NewHandler(teachersSvc, authSvc)
 
 	//qa
-	qaNotifier := notify.NewQAAdapter(notifySvc) 
+	qaNotifier := notify.NewQAAdapter(notifySvc)
 	qaStore := qa.NewStore(db)
 	qaSvc := qa.NewService(qaStore, qaNotifier)
 	qaHandler := qa.NewHandler(qaSvc, authSvc)
@@ -122,10 +122,10 @@ func main() {
 	usersHandler := users.NewHandler(usersSvc, authSvc)
 
 	r := buildRouter(
-		authHandler, authSvc, 
-		reviewsHandler,eventsHandler,
-		roomsHandler,teachersHandler,
-		qaHandler,notifyHandler,
+		authHandler, authSvc,
+		reviewsHandler, eventsHandler,
+		roomsHandler, teachersHandler,
+		qaHandler, notifyHandler,
 		usersHandler,
 	)
 
@@ -187,35 +187,39 @@ func main() {
 }
 
 func buildRouter(
-	authHandler 		*auth.Handler,
-	authSvc 			*auth.Service,
-	reviewsHandler 		*reviews.Handler,
-	eventsHandler		*events.Handler,
-	roomsHandler 		*rooms.Handler,
-	teachersHandler 	*teachers.Handler,
-	qaHandler 			*qa.Handler,
-	notifyHandler		*notify.Handler,
-	usersHandler 		*users.Handler,
-	) http.Handler {
+	authHandler *auth.Handler,
+	authSvc *auth.Service,
+	reviewsHandler *reviews.Handler,
+	eventsHandler *events.Handler,
+	roomsHandler *rooms.Handler,
+	teachersHandler *teachers.Handler,
+	qaHandler *qa.Handler,
+	notifyHandler *notify.Handler,
+	usersHandler *users.Handler,
+) http.Handler {
 	r := chi.NewRouter()
 
+	// Базовые middleware:
+	// ID запроса -> Логирование ->
+	// Восстановление после паник ->
+	// Таймаут -> Лимит тела (2 МБ)
 	r.Use(middleware.RequestIDMiddleware)
+	r.Use(middleware.LoggingMiddleware)
 	r.Use(chiMiddleware.Recoverer)
+	r.Use(middleware.RequestTimeoutMiddleware(10 * time.Second))
+	r.Use(middleware.BodyLimitMiddleware(2 << 20))
 
 	r.Mount("/api/v1/auth", authHandler.Router())
 
-	r.With(middleware.AuthMiddleware(authSvc)).
-		Get("/api/v1/auth/me", authHandler.MeHandler())
-
 	r.Mount("/api/v1/reviews", reviewsHandler.Router())
 
-	r.Mount("/api/v1/events", eventsHandler.Router()) 
+	r.Mount("/api/v1/events", eventsHandler.Router())
 
 	r.Mount("/api/v1/rooms", roomsHandler.Router())
 
 	r.Mount("/api/v1/teachers", teachersHandler.Router())
 
-	r.Mount("/api/v1/qa", qaHandler.Router()) 
+	r.Mount("/api/v1/qa", qaHandler.Router())
 
 	r.Mount("/api/v1/notifications", notifyHandler.Router())
 

@@ -37,7 +37,7 @@ func NewStore(db *sql.DB) Store { return &pgStore{db: db} }
 
 const qaColumns = `
 	id, key_id, sender_id, type_forum_id, title, description, tags, status_id, created_at,
-	moderator_id, answer, answered_at, reviewer_id, review_comment, reviewed_at
+	moderator_id, COALESCE(answer, ''), answered_at, reviewer_id, COALESCE(review_comment, ''), reviewed_at
 `
 
 func scanQA(row interface{ Scan(dest ...any) error }, q *QA) error {
