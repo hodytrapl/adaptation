@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 
@@ -20,6 +22,10 @@ type Config struct {
 }
 
 func Load() *Config {
+	if err := godotenv.Load(); err != nil {
+		log.Println("Файл .env не найден, используются системные переменные")
+	}
+	
 	cfg := &Config{
 		Port:        getEnv("HTTP_PORT", "8080"),
 		DatabaseURL: getEnv("DATABASE_URL", ""),
