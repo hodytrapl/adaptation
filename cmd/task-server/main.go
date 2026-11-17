@@ -34,7 +34,8 @@ import (
 
 func main() {
 	cfg := config.Load()
-
+	//password db DATABASE_URL='postgresql://postgres:!_!_Secret12secret_!_!@db.zxuuwzfdhjaeqlkwcjkm.supabase.co:5432/postgres'
+	//host https://supabase.com/dashboard/project/zxuuwzfdhjaeqlkwcjkm/settings/general?showConnect=true&connectTab=direct&method=direct
 	if cfg.DatabaseURL == "" {
 		log.Fatalf("DATABASE_URL is required")
 	}
