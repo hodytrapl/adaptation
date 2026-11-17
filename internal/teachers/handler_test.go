@@ -16,10 +16,10 @@ import (
 // ---- fake store ----
 
 type fakeStore struct {
-	mu      sync.Mutex
-	nextID  int64
-	items   map[int64]*Teacher
-	rooms   map[int64]*RoomRef // предзаполняем в setup
+	mu     sync.Mutex
+	nextID int64
+	items  map[int64]*Teacher
+	rooms  map[int64]*RoomRef
 }
 
 func newFakeStore() *fakeStore {
@@ -36,7 +36,7 @@ func (f *fakeStore) enrich(t *Teacher) *Teacher {
 		if r, ok := f.rooms[cp.Room.ID]; ok {
 			cp.Room = r
 		} else {
-			cp.Room = nil // FK violated → как в реальной БД: комната удалена
+			cp.Room = nil
 		}
 	}
 	return &cp
@@ -75,7 +75,6 @@ func (f *fakeStore) List(_ context.Context, flt ListFilter) ([]Teacher, int, err
 			continue
 		}
 		if flt.Query != "" {
-			// простой case-insensitive contains
 			if !containsFold(t.FullName, flt.Query) {
 				continue
 			}
@@ -163,11 +162,15 @@ func setupRouter(t *testing.T, scopes []string) (http.Handler, *fakeStore) {
 
 func doJSON(t *testing.T, router http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	t.Logf("--> REQUEST: %s %s | Body: %s", method, path, body)
+
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer any")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
+
+	t.Logf("<-- RESPONSE: Status %d | Body: %s", rec.Code, rec.Body.String())
 	return rec
 }
 
@@ -176,22 +179,27 @@ func doJSON(t *testing.T, router http.Handler, method, path, body string) *httpt
 func TestCreateTeacher_RequiresScope(t *testing.T) {
 	payload := `{"full_name":"Ivanov I.I.","department":"CS","position":"Professor","contacts":{"email":"i@x.io"}}`
 
-	router, _ := setupRouter(t, []string{"teachers:read"})
-	rec := doJSON(t, router, http.MethodPost, "/", payload)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("read-only: expected 403, got %d: %s", rec.Code, rec.Body.String())
+	cases := []struct {
+		name   string
+		scopes []string
+		want   int
+	}{
+		{"read-only user (forbidden)", []string{"teachers:read"}, http.StatusForbidden},
+		{"moderator with write scope (created)", []string{"teachers:read", "teachers:write"}, http.StatusCreated},
+		{"admin user (created)", []string{"teachers:admin"}, http.StatusCreated},
 	}
 
-	router, _ = setupRouter(t, []string{"teachers:read", "teachers:write"})
-	rec = doJSON(t, router, http.MethodPost, "/", payload)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("moderator: expected 201, got %d: %s", rec.Code, rec.Body.String())
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Logf("Checking access with scopes: %v", tc.scopes)
+			router, _ := setupRouter(t, tc.scopes)
+			rec := doJSON(t, router, http.MethodPost, "/", payload)
 
-	router, _ = setupRouter(t, []string{"teachers:admin"})
-	rec = doJSON(t, router, http.MethodPost, "/", payload)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("admin: expected 201, got %d: %s", rec.Code, rec.Body.String())
+			if rec.Code != tc.want {
+				t.Fatalf("Expected status %d, got %d", tc.want, rec.Code)
+			}
+			t.Logf("OK: status %d matched expected", rec.Code)
+		})
 	}
 }
 
@@ -238,8 +246,9 @@ func TestCreateTeacher_Validation(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			rec := doJSON(t, router, http.MethodPost, "/", c.payload)
 			if rec.Code != c.want {
-				t.Fatalf("expected %d, got %d: %s", c.want, rec.Code, rec.Body.String())
+				t.Fatalf("Expected status %d, got %d", c.want, rec.Code)
 			}
+			t.Logf("OK: case '%s' validated with status %d", c.name, rec.Code)
 		})
 	}
 }
@@ -247,7 +256,7 @@ func TestCreateTeacher_Validation(t *testing.T) {
 func TestTeacher_RoomRef(t *testing.T) {
 	router, _ := setupRouter(t, []string{"teachers:write"})
 
-	// создаём с привязкой к комнате 1
+	t.Log("Step 1: Creating teacher linked to room ID=1")
 	rec := doJSON(t, router, http.MethodPost, "/",
 		`{"full_name":"Ivanov I.I.","department":"CS","position":"Professor","room_id":1}`)
 	if rec.Code != http.StatusCreated {
@@ -257,13 +266,14 @@ func TestTeacher_RoomRef(t *testing.T) {
 	_ = json.NewDecoder(rec.Body).Decode(&created)
 
 	if created.Room == nil {
-		t.Fatal("expected embedded room")
+		t.Fatal("Expected embedded Room struct, got nil")
 	}
 	if created.Room.Number != "A101" || created.Room.Building != "Main" {
-		t.Errorf("room mismatch: %+v", created.Room)
+		t.Errorf("Room mismatch: %+v", created.Room)
 	}
+	t.Logf("OK: Room attached: %s (%s)", created.Room.Number, created.Room.Building)
 
-	// PATCH room_id=0 — отвязать
+	t.Logf("Step 2: Unlinking room via PATCH /%d with room_id=0", created.ID)
 	rec = doJSON(t, router, http.MethodPatch, "/"+itoa(created.ID), `{"room_id":0}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unlink: %d %s", rec.Code, rec.Body.String())
@@ -271,14 +281,16 @@ func TestTeacher_RoomRef(t *testing.T) {
 	var updated Teacher
 	_ = json.NewDecoder(rec.Body).Decode(&updated)
 	if updated.Room != nil {
-		t.Errorf("expected room=nil after unlink, got %+v", updated.Room)
+		t.Errorf("Expected room=nil after unlink, got: %+v", updated.Room)
 	}
+	t.Log("OK: Room unlinked (room=nil)")
 }
 
 func TestListTeachers_Public(t *testing.T) {
 	adminRouter, store := setupRouter(t, []string{"teachers:admin"})
 	pub := NewHandler(NewService(store), &fakeVerifier{}).Router()
 
+	t.Log("Seeding test data (3 teachers)...")
 	mk := func(name, dept string, roomID int64) {
 		payload := `{"full_name":"` + name + `","department":"` + dept + `","position":"P","room_id":` + itoa(roomID) + `}`
 		rec := doJSON(t, adminRouter, http.MethodPost, "/", payload)
@@ -290,37 +302,45 @@ func TestListTeachers_Public(t *testing.T) {
 	mk("Petrov P.P.", "CS", 2)
 	mk("Sidorov S.S.", "Math", 1)
 
-	// без фильтра
-	rec := doJSON(t, pub, http.MethodGet, "/", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list: %d", rec.Code)
-	}
-	var page ListResponse
-	_ = json.NewDecoder(rec.Body).Decode(&page)
-	if page.Total != 3 {
-		t.Errorf("total: want 3, got %d", page.Total)
-	}
+	t.Run("no filter", func(t *testing.T) {
+		rec := doJSON(t, pub, http.MethodGet, "/", "")
+		var page ListResponse
+		_ = json.NewDecoder(rec.Body).Decode(&page)
+		t.Logf("Found records without filter: %d (expected 3)", page.Total)
+		if page.Total != 3 {
+			t.Errorf("total: want 3, got %d", page.Total)
+		}
+	})
 
-	// ?department=CS
-	rec = doJSON(t, pub, http.MethodGet, "/?department=CS", "")
-	_ = json.NewDecoder(rec.Body).Decode(&page)
-	if page.Total != 2 {
-		t.Errorf("department filter: want 2, got %d", page.Total)
-	}
+	t.Run("filter by department=CS", func(t *testing.T) {
+		rec := doJSON(t, pub, http.MethodGet, "/?department=CS", "")
+		var page ListResponse
+		_ = json.NewDecoder(rec.Body).Decode(&page)
+		t.Logf("Found records for department=CS: %d (expected 2)", page.Total)
+		if page.Total != 2 {
+			t.Errorf("department filter: want 2, got %d", page.Total)
+		}
+	})
 
-	// ?room_id=1 — двое (Ivanov, Sidorov)
-	rec = doJSON(t, pub, http.MethodGet, "/?room_id=1", "")
-	_ = json.NewDecoder(rec.Body).Decode(&page)
-	if page.Total != 2 {
-		t.Errorf("room filter: want 2, got %d", page.Total)
-	}
+	t.Run("filter by room_id=1", func(t *testing.T) {
+		rec := doJSON(t, pub, http.MethodGet, "/?room_id=1", "")
+		var page ListResponse
+		_ = json.NewDecoder(rec.Body).Decode(&page)
+		t.Logf("Found records for room_id=1: %d (expected 2)", page.Total)
+		if page.Total != 2 {
+			t.Errorf("room filter: want 2, got %d", page.Total)
+		}
+	})
 
-	// ?q=petr — один
-	rec = doJSON(t, pub, http.MethodGet, "/?q=petr", "")
-	_ = json.NewDecoder(rec.Body).Decode(&page)
-	if page.Total != 1 {
-		t.Errorf("search: want 1, got %d", page.Total)
-	}
+	t.Run("search by q=petr", func(t *testing.T) {
+		rec := doJSON(t, pub, http.MethodGet, "/?q=petr", "")
+		var page ListResponse
+		_ = json.NewDecoder(rec.Body).Decode(&page)
+		t.Logf("Found records for search 'petr': %d (expected 1)", page.Total)
+		if page.Total != 1 {
+			t.Errorf("search: want 1, got %d", page.Total)
+		}
+	})
 }
 
 func itoa(n int64) string {
